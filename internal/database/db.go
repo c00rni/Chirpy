@@ -86,6 +86,26 @@ func (db *DB) CreateUser(email string, password []byte) (User, error) {
 	return user, nil
 }
 
+// UpdateUser update a user info and save it to disk
+func (db *DB) UpdateUser(id int, email string, password []byte) (User, error) {
+	database, loadingErr := db.LoadDB()
+	if loadingErr != nil {
+		return User{}, loadingErr
+	}
+
+	user := User{
+		Id:       id,
+		Email:    email,
+		Password: password,
+	}
+
+	database.Users[id] = user
+	if wErr := db.writeDB(database); wErr != nil {
+		return User{}, wErr
+	}
+	return user, nil
+}
+
 // GetChirps returns all chirps in the database
 func (db *DB) GetChirps() ([]Chirp, error) {
 	database, err := db.LoadDB()

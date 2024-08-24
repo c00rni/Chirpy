@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/c00rni/chirpy/internal/database"
+	"github.com/joho/godotenv"
 	"log"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ type apiConfig struct {
 	port           string
 	chirpId        int
 	db             *database.DB
+	jwtSecret      string
 }
 
 func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
@@ -39,10 +41,17 @@ func main() {
 	}
 	defer os.Remove(databasePath)
 
+	godotenv.Load()
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		log.Fatalln("'JWT_SECRET' not set, define a .env with a secret to start.")
+		return
+	}
 	apiCfg := apiConfig{
 		fileserverHits: 0,
 		port:           "8080",
 		db:             connexion,
+		jwtSecret:      jwtSecret,
 	}
 
 	mux.Handle("GET /app/*", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot)))))
@@ -54,6 +63,7 @@ func main() {
 	mux.HandleFunc("GET /api/chirps/{id}", apiCfg.getChirps)
 	mux.HandleFunc("POST /api/users", apiCfg.handlerUser)
 	mux.HandleFunc("POST /api/login", apiCfg.handleAuth)
+	mux.HandleFunc("PUT /api/users", apiCfg.updatePasswordHandle)
 
 	srv := &http.Server{
 		Handler: mux,
