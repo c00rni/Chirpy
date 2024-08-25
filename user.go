@@ -1,96 +1,72 @@
 package main
 
 import (
-	"encoding/json"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 )
 
-type loginInput struct {
-	Email              string `json:"email"`
-	Password           string `json:"password"`
-	Expires_in_seconds int    `json:"expires_in_seconds"`
-}
-
-type credentials struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-}
-
-type responseWithToken struct {
-	Id    int    `json:"id"`
-	Email string `json:"email"`
-	Token string `json:"token"`
-}
-
 func (cfg *apiConfig) handlerUser(w http.ResponseWriter, req *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	decoder := json.NewDecoder(req.Body)
-	userData := credentials{}
-	err := decoder.Decode(&userData)
-	if err != nil {
-		log.Printf("Failed to decode user input : %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	bytePassword := []byte(userData.Password)
-	if len(bytePassword) > 72 {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	hashedPassword, hErr := bcrypt.GenerateFromPassword(bytePassword, bcrypt.DefaultCost)
-	if hErr != nil {
-		log.Printf("Failed to cipher a password")
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	user, dbErr := cfg.db.CreateUser(userData.Email, hashedPassword)
-	if dbErr != nil {
-		log.Printf("Failed to get data : %v", dbErr)
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte{})
-		return
-	}
-
 	type response struct {
 		Id    int    `json:"id"`
 		Email string `json:"email"`
 	}
 
-	data, er := json.Marshal(response{Id: user.Id, Email: user.Email})
-	if er != nil {
-		log.Printf("Failed to read data : %s", er)
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte{})
+	type credentials struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	userData := credentials{}
+	if err := decodeJSONBody(req, &userData); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Bad input data")
 		return
 	}
 
-	w.WriteHeader(http.StatusCreated)
-	w.Write(data)
+	hashedPassword, decryptErr := bcryptHashedPassword(w, userData.Password)
+	if decryptErr != nil {
+		respondWithError(w, http.StatusBadRequest, "Password too long")
+		return
+	}
+
+	user, dbErr := cfg.db.CreateUser(userData.Email, hashedPassword)
+	if dbErr != nil {
+		log.Printf("Failed to get data : %v", dbErr)
+		respondWithError(w, http.StatusInternalServerError, "User not registered")
+		return
+	}
+
+	sErr := respondWithJSON(w, http.StatusCreated, response{Id: user.Id, Email: user.Email})
+	if sErr != nil {
+		log.Printf("Failed to read data : %s", sErr)
+		return
+	}
 }
 
 // HandleAuth verify the user credential with the database send back the matching id and email
 func (cfg *apiConfig) handleAuth(w http.ResponseWriter, req *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+	type requestInput struct {
+		Email              string `json:"email"`
+		Password           string `json:"password"`
+		Expires_in_seconds int    `json:"expires_in_seconds"`
+	}
 
-	decoder := json.NewDecoder(req.Body)
-	userData := loginInput{}
-	err := decoder.Decode(&userData)
+	type response struct {
+		Id    int    `json:"id"`
+		Email string `json:"email"`
+		Token string `json:"token"`
+	}
+
+	userData := requestInput{}
+	err := decodeJSONBody(req, &userData)
 	if err != nil {
 		log.Printf("Failed to decode user input : %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
+		respondWithError(w, http.StatusInternalServerError, "Bad input data")
 		return
 	}
-	inputEmail := userData.Email
-	inputPass := userData.Password
 
 	allDb, dErr := cfg.db.LoadDB()
 	if dErr != nil {
@@ -99,7 +75,7 @@ func (cfg *apiConfig) handleAuth(w http.ResponseWriter, req *http.Request) {
 	}
 
 	for _, user := range allDb.Users {
-		if err := bcrypt.CompareHashAndPassword(user.Password, []byte(inputPass)); err == nil && user.Email == inputEmail {
+		if err := bcrypt.CompareHashAndPassword(user.Password, []byte(userData.Password)); err == nil && user.Email == userData.Email {
 
 			const dayDuration = 60 * 60 * 24
 			var expirationTime time.Duration = time.Second * time.Duration(userData.Expires_in_seconds)
@@ -115,99 +91,67 @@ func (cfg *apiConfig) handleAuth(w http.ResponseWriter, req *http.Request) {
 				Subject:   strconv.Itoa(user.Id),
 			}
 
-			token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-			ss, sErr := token.SignedString([]byte(cfg.jwtSecret))
-			if sErr != nil {
-				log.Printf("Failed to generate a token : %v", sErr)
-				w.WriteHeader(http.StatusInternalServerError)
+			jwtToken, cErr := createJWT(claims, jwt.SigningMethodHS256, []byte(cfg.jwtSecret))
+			if cErr != nil {
+				log.Printf("Error %v", cErr)
+				respondWithError(w, http.StatusInternalServerError, "Internal Error")
 				return
 			}
-
-			w.WriteHeader(http.StatusOK)
-			bodyRes, _ := json.Marshal(responseWithToken{Id: user.Id, Email: user.Email, Token: ss})
-			w.Write(bodyRes)
+			respondWithJSON(w, http.StatusOK, response{Id: user.Id, Email: user.Email, Token: jwtToken})
 			return
 		}
 	}
-	w.WriteHeader(http.StatusUnauthorized)
-	w.Write([]byte{})
+	respondWithError(w, http.StatusUnauthorized, "Unauthorized")
 	return
 }
 
-func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) error {
-	response, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	w.Write(response)
-	return nil
-}
-
 func (cfg *apiConfig) updatePasswordHandle(w http.ResponseWriter, req *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	tokenHeader := req.Header.Get("Authorization")
-	tokenStr := strings.TrimPrefix(tokenHeader, "Bearer ")
-	token, err := jwt.ParseWithClaims(tokenStr, &jwt.RegisteredClaims{}, func(token *jwt.Token) (interface{}, error) {
-		return []byte(cfg.jwtSecret), nil
-	})
-	if err != nil {
-		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte{})
-		return
+	type response struct {
+		Id    int    `json:"id"`
+		Email string `json:"email"`
 	}
-	idStr, err1 := token.Claims.GetSubject()
-	if err1 != nil {
-		w.WriteHeader(http.StatusUnauthorized)
-		log.Printf("Fatal2 error: %v", err1)
-		return
+
+	type credentials struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
-	userId, err2 := strconv.Atoi(idStr)
-	if err2 != nil {
-		log.Printf("Fatal3 error: %v", err2)
-		w.WriteHeader(http.StatusUnauthorized)
+
+	tokenStr := extractJWT(req)
+	vErr := verifyToken(tokenStr, []byte(cfg.jwtSecret), "chirpy")
+	if vErr != nil {
+		respondWithError(w, http.StatusUnauthorized, "Unauthorized token")
 		return
 	}
 
-	decoder := json.NewDecoder(req.Body)
 	userData := credentials{}
-	dErr := decoder.Decode(&userData)
+	dErr := decodeJSONBody(req, &userData)
 	if dErr != nil {
-		log.Printf("Failed to decode user input : %v", dErr)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	inputPass := userData.Password
-
-	bytePassword := []byte(inputPass)
-	if len(bytePassword) > 72 {
-		log.Printf("Password to long")
-		w.WriteHeader(http.StatusBadRequest)
+		respondWithError(w, http.StatusBadRequest, "Internal Error")
 		return
 	}
 
-	hashedPassword, hErr := bcrypt.GenerateFromPassword(bytePassword, bcrypt.DefaultCost)
+	hashedPassword, hErr := bcryptHashedPassword(w, userData.Password)
 	if hErr != nil {
 		log.Printf("Failed to cipher a password")
-		w.WriteHeader(http.StatusInternalServerError)
+		respondWithError(w, http.StatusBadRequest, "Failed to cipher password")
 		return
 	}
+
+	suject, sErr := getTokenSubject(tokenStr, []byte(cfg.jwtSecret))
+	if sErr != nil {
+		respondWithError(w, http.StatusBadRequest, "Bad authentication token")
+	}
+	userId, _ := strconv.Atoi(suject)
 
 	modifiedUser, uErr := cfg.db.UpdateUser(userId, userData.Email, hashedPassword)
 	if uErr != nil {
 		log.Printf("Error while update: %v", uErr)
 		return
 	}
-	type response struct {
-		Id    int    `json:"id"`
-		Email string `json:"email"`
-	}
-	bodyRes, err3 := json.Marshal(response{Id: userId, Email: modifiedUser.Email})
+
+	err3 := respondWithJSON(w, http.StatusOK, response{Id: userId, Email: modifiedUser.Email})
 	if err3 != nil {
-		log.Printf("Fatal error: %v", err3)
+		respondWithError(w, http.StatusInternalServerError, "Internal error")
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write(bodyRes)
 }
