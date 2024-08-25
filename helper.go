@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"github.com/golang-jwt/jwt/v5"
@@ -25,6 +27,15 @@ func createJWT(claims *jwt.RegisteredClaims, signingMethod jwt.SigningMethod, se
 		return "", sErr
 	}
 	return jwtToken, nil
+}
+
+func generateRefreshToken() (string, error) {
+	randBytes := make([]byte, 32)
+	_, err := rand.Read(randBytes)
+	if err != nil {
+		return "", errors.New("Failed to create the refreshToken")
+	}
+	return hex.EncodeToString(randBytes), nil
 }
 
 func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) error {

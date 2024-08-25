@@ -55,9 +55,10 @@ func (cfg *apiConfig) handleAuth(w http.ResponseWriter, req *http.Request) {
 	}
 
 	type response struct {
-		Id    int    `json:"id"`
-		Email string `json:"email"`
-		Token string `json:"token"`
+		Id           int    `json:"id"`
+		Email        string `json:"email"`
+		RefreshToken string `json:"refresh_token"`
+		Token        string `json:"token"`
 	}
 
 	userData := requestInput{}
@@ -77,10 +78,10 @@ func (cfg *apiConfig) handleAuth(w http.ResponseWriter, req *http.Request) {
 	for _, user := range allDb.Users {
 		if err := bcrypt.CompareHashAndPassword(user.Password, []byte(userData.Password)); err == nil && user.Email == userData.Email {
 
-			const dayDuration = 60 * 60 * 24
+			const hourDuration = 60 * 60
 			var expirationTime time.Duration = time.Second * time.Duration(userData.Expires_in_seconds)
-			if userData.Expires_in_seconds == 0 || userData.Expires_in_seconds > dayDuration {
-				expirationTime = time.Hour * 24
+			if userData.Expires_in_seconds == 0 || userData.Expires_in_seconds > hourDuration {
+				expirationTime = time.Hour
 			}
 
 			// Create the Claims
@@ -91,18 +92,73 @@ func (cfg *apiConfig) handleAuth(w http.ResponseWriter, req *http.Request) {
 				Subject:   strconv.Itoa(user.Id),
 			}
 
+			refreshToken, gErr := generateRefreshToken()
+			if gErr != nil {
+				respondWithJSON(w, http.StatusInternalServerError, "Internal Error: refresh token generation.")
+				return
+			}
+			_, uErr := cfg.db.UpdateUser(user.Id, user.Email, user.Password, refreshToken)
+			if uErr != nil {
+				respondWithJSON(w, http.StatusInternalServerError, "Internal Error: refresh token generation.")
+				return
+			}
 			jwtToken, cErr := createJWT(claims, jwt.SigningMethodHS256, []byte(cfg.jwtSecret))
 			if cErr != nil {
 				log.Printf("Error %v", cErr)
 				respondWithError(w, http.StatusInternalServerError, "Internal Error")
 				return
 			}
-			respondWithJSON(w, http.StatusOK, response{Id: user.Id, Email: user.Email, Token: jwtToken})
+			respondWithJSON(w, http.StatusOK, response{Id: user.Id, Email: user.Email, Token: jwtToken, RefreshToken: refreshToken})
 			return
 		}
 	}
 	respondWithError(w, http.StatusUnauthorized, "Unauthorized")
 	return
+}
+
+func (cfg *apiConfig) handleRefreshToken(w http.ResponseWriter, req *http.Request) {
+	type response struct {
+		Token string `json:"token"`
+	}
+
+	token := extractJWT(req)
+	if token == "" {
+		respondWithError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	allDb, dErr := cfg.db.LoadDB()
+	if dErr != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	for _, user := range allDb.Users {
+		if user.RefreshToken == token {
+			today := time.Now()
+			if today.After(user.TokenExpiration) {
+				respondWithJSON(w, http.StatusUnauthorized, "Unauthorized")
+				return
+			}
+
+			// Create the Claims
+			claims := &jwt.RegisteredClaims{
+				Issuer:    "chirpy",
+				IssuedAt:  jwt.NewNumericDate(time.Now()),
+				ExpiresAt: jwt.NewNumericDate((time.Now()).Add(time.Hour)),
+				Subject:   strconv.Itoa(user.Id),
+			}
+
+			jwtToken, jErr := createJWT(claims, jwt.SigningMethodHS256, []byte(cfg.jwtSecret))
+			if jErr != nil {
+				respondWithError(w, http.StatusInternalServerError, "Internal error")
+				return
+			}
+			respondWithJSON(w, http.StatusOK, response{Token: jwtToken})
+			return
+		}
+	}
+	respondWithError(w, http.StatusUnauthorized, "Unauthorized")
 }
 
 func (cfg *apiConfig) updatePasswordHandle(w http.ResponseWriter, req *http.Request) {
@@ -143,7 +199,7 @@ func (cfg *apiConfig) updatePasswordHandle(w http.ResponseWriter, req *http.Requ
 	}
 	userId, _ := strconv.Atoi(suject)
 
-	modifiedUser, uErr := cfg.db.UpdateUser(userId, userData.Email, hashedPassword)
+	modifiedUser, uErr := cfg.db.UpdateUser(userId, userData.Email, hashedPassword, "")
 	if uErr != nil {
 		log.Printf("Error while update: %v", uErr)
 		return
@@ -154,4 +210,34 @@ func (cfg *apiConfig) updatePasswordHandle(w http.ResponseWriter, req *http.Requ
 		respondWithError(w, http.StatusInternalServerError, "Internal error")
 		return
 	}
+}
+
+func (cfg *apiConfig) handleRevoke(w http.ResponseWriter, req *http.Request) {
+	token := extractJWT(req)
+	if token == "" {
+		respondWithError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	allDb, dErr := cfg.db.LoadDB()
+	if dErr != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	revokeToken, _ := generateRefreshToken()
+	for _, user := range allDb.Users {
+		if user.RefreshToken == token {
+			_, err := cfg.db.UpdateUser(user.Id, user.Email, user.Password, revokeToken)
+			if err != nil {
+				respondWithError(w, http.StatusInternalServerError, "Internal error")
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			w.Write([]byte{})
+			return
+		}
+	}
+	respondWithError(w, http.StatusUnauthorized, "Unauthorized")
+	return
 }

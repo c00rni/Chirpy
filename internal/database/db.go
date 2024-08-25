@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"sync"
+	"time"
 )
 
 type DB struct {
@@ -21,9 +22,11 @@ type DBStructure struct {
 }
 
 type User struct {
-	Id       int    `json:"id"`
-	Email    string `json:"email"`
-	Password []byte `json:"password"`
+	Id              int       `json:"id"`
+	Email           string    `json:"email"`
+	Password        []byte    `json:"password"`
+	RefreshToken    string    `json:"refresh_token"`
+	TokenExpiration time.Time `json:"token_expiration"`
 }
 
 type Chirp struct {
@@ -87,16 +90,22 @@ func (db *DB) CreateUser(email string, password []byte) (User, error) {
 }
 
 // UpdateUser update a user info and save it to disk
-func (db *DB) UpdateUser(id int, email string, password []byte) (User, error) {
+func (db *DB) UpdateUser(id int, email string, password []byte, refreshToken string) (User, error) {
 	database, loadingErr := db.LoadDB()
 	if loadingErr != nil {
 		return User{}, loadingErr
 	}
 
+	if refreshToken == "" {
+		refreshToken = database.Users[id].RefreshToken
+	}
+
 	user := User{
-		Id:       id,
-		Email:    email,
-		Password: password,
+		Id:              id,
+		Email:           email,
+		Password:        password,
+		RefreshToken:    refreshToken,
+		TokenExpiration: time.Now().Add(time.Hour * 24 * 60),
 	}
 
 	database.Users[id] = user
