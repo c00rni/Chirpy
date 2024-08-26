@@ -13,6 +13,7 @@ func (cfg *apiConfig) handlerUser(w http.ResponseWriter, req *http.Request) {
 	type response struct {
 		Id    int    `json:"id"`
 		Email string `json:"email"`
+		IsRed bool   `json:"is_chirpy_red"`
 	}
 
 	type credentials struct {
@@ -39,7 +40,7 @@ func (cfg *apiConfig) handlerUser(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	sErr := respondWithJSON(w, http.StatusCreated, response{Id: user.Id, Email: user.Email})
+	sErr := respondWithJSON(w, http.StatusCreated, response{Id: user.Id, Email: user.Email, IsRed: user.IsRed})
 	if sErr != nil {
 		log.Printf("Failed to read data : %s", sErr)
 		return
@@ -59,6 +60,7 @@ func (cfg *apiConfig) handleAuth(w http.ResponseWriter, req *http.Request) {
 		Email        string `json:"email"`
 		RefreshToken string `json:"refresh_token"`
 		Token        string `json:"token"`
+		IsRed        bool   `json:"is_chirpy_red"`
 	}
 
 	userData := requestInput{}
@@ -108,7 +110,7 @@ func (cfg *apiConfig) handleAuth(w http.ResponseWriter, req *http.Request) {
 				respondWithError(w, http.StatusInternalServerError, "Internal Error")
 				return
 			}
-			respondWithJSON(w, http.StatusOK, response{Id: user.Id, Email: user.Email, Token: jwtToken, RefreshToken: refreshToken})
+			respondWithJSON(w, http.StatusOK, response{Id: user.Id, Email: user.Email, Token: jwtToken, RefreshToken: refreshToken, IsRed: user.IsRed})
 			return
 		}
 	}
@@ -158,7 +160,6 @@ func (cfg *apiConfig) handleRefreshToken(w http.ResponseWriter, req *http.Reques
 			return
 		}
 	}
-	respondWithError(w, http.StatusUnauthorized, "Unauthorized")
 }
 
 func (cfg *apiConfig) updatePasswordHandle(w http.ResponseWriter, req *http.Request) {

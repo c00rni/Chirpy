@@ -27,6 +27,7 @@ type User struct {
 	Password        []byte    `json:"password"`
 	RefreshToken    string    `json:"refresh_token"`
 	TokenExpiration time.Time `json:"token_expiration"`
+	IsRed           bool      `json:"is_chirpy_red"`
 }
 
 type Chirp struct {
@@ -112,6 +113,25 @@ func (db *DB) DeleteChirp(chirpId, userId int) error {
 	return nil
 }
 
+// CreateUser create a new user and save it to disk
+func (db *DB) UpgradeUser(userId int) error {
+	database, loadingErr := db.LoadDB()
+	if loadingErr != nil {
+		return loadingErr
+	}
+	user, ok := database.Users[userId]
+	if !ok {
+		return errors.New("User do not exist.")
+	}
+	user.IsRed = true
+	database.Users[userId] = user
+
+	if wErr := db.writeDB(database); wErr != nil {
+		return wErr
+	}
+	return nil
+}
+
 // UpdateUser update a user info and save it to disk
 func (db *DB) UpdateUser(id int, email string, password []byte, refreshToken string) (User, error) {
 	database, loadingErr := db.LoadDB()
@@ -129,6 +149,7 @@ func (db *DB) UpdateUser(id int, email string, password []byte, refreshToken str
 		Password:        password,
 		RefreshToken:    refreshToken,
 		TokenExpiration: time.Now().Add(time.Hour * 24 * 60),
+		IsRed:           database.Users[id].IsRed,
 	}
 
 	database.Users[id] = user
