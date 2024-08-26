@@ -1,7 +1,9 @@
 package main
 
 import (
+	"github.com/joho/godotenv"
 	"net/http"
+	"os"
 )
 
 func (cfg *apiConfig) handlePolkaHooks(w http.ResponseWriter, req *http.Request) {
@@ -10,6 +12,12 @@ func (cfg *apiConfig) handlePolkaHooks(w http.ResponseWriter, req *http.Request)
 		Data  struct {
 			UserID int `json:"user_id"`
 		} `json:"data"`
+	}
+	godotenv.Load()
+	apiKeyStr := extractApiKey(req)
+	if apiKeyStr != os.Getenv("POLKA_API_KEY") {
+		respondWithError(w, http.StatusUnauthorized, "Unauthoried")
+		return
 	}
 	hookData := hook{}
 	dErr := decodeJSONBody(req, &hookData)

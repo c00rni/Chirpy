@@ -118,6 +118,11 @@ func extractJWT(r *http.Request) string {
 	return strings.TrimPrefix(tokenHeader, "Bearer ")
 }
 
+func extractApiKey(r *http.Request) string {
+	tokenHeader := r.Header.Get("Authorization")
+	return strings.TrimPrefix(tokenHeader, "ApiKey ")
+}
+
 func getPathValue(r *http.Request, param string) string {
 	return r.PathValue(param)
 }
