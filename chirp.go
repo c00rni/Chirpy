@@ -137,22 +137,51 @@ func (cfg *apiConfig) handleChirpDelete(w http.ResponseWriter, req *http.Request
 
 func (cfg *apiConfig) listChirps(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	chirps, dbErr := cfg.db.GetChirps()
-	if dbErr != nil {
-		log.Printf("Failed to get data : %v", dbErr)
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte{})
-		return
+	authorIdStr := req.URL.Query().Get("author_id")
+	authorId, aErr := strconv.Atoi(authorIdStr)
+	if authorIdStr != "" && aErr != nil {
+		respondWithError(w, http.StatusInternalServerError, "Internal error")
 	}
-	data, er := json.Marshal(chirps)
-	if er != nil {
-		log.Printf("Failed to read data : %s", er)
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte{})
-		return
+	sortDirection := req.URL.Query().Get("sort")
+	if sortDirection != "desc" {
+		sortDirection = "asc"
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write(data)
+	if authorIdStr == "" {
+		chirps, dbErr := cfg.db.GetChirps(sortDirection)
+		if dbErr != nil {
+			log.Printf("Failed to get data : %v", dbErr)
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte{})
+			return
+		}
+		data, er := json.Marshal(chirps)
+		if er != nil {
+			log.Printf("Failed to read data : %s", er)
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte{})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write(data)
+	} else {
+		chirps, dbErr := cfg.db.GetChirps(sortDirection, authorId)
+		if dbErr != nil {
+			log.Printf("Failed to get data : %v", dbErr)
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte{})
+			return
+		}
+		data, er := json.Marshal(chirps)
+		if er != nil {
+			log.Printf("Failed to read data : %s", er)
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte{})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write(data)
+	}
+	return
 }
 
 func (cfg *apiConfig) getChirps(w http.ResponseWriter, r *http.Request) {

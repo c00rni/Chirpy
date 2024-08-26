@@ -159,17 +159,32 @@ func (db *DB) UpdateUser(id int, email string, password []byte, refreshToken str
 	return user, nil
 }
 
-// GetChirps returns all chirps in the database
-func (db *DB) GetChirps() ([]Chirp, error) {
+func (db *DB) GetChirps(sorted string, ids ...int) ([]Chirp, error) {
 	database, err := db.LoadDB()
 	if err != nil {
 		return []Chirp{}, err
 	}
-	chirps := []Chirp{}
-	for _, chirp := range database.Chirps {
-		chirps = append(chirps, chirp)
+	var idMap = make(map[int]bool)
+	for i := 0; i < len(ids); i++ {
+		idMap[ids[i]] = true
 	}
-	sort.Slice(chirps, func(i, j int) bool { return chirps[i].Id < chirps[j].Id })
+	chirps := []Chirp{}
+	if len(ids) == 0 {
+		for _, chirp := range database.Chirps {
+			chirps = append(chirps, chirp)
+		}
+	} else {
+		for _, chirp := range database.Chirps {
+			if _, ok := idMap[chirp.AuthorId]; ok {
+				chirps = append(chirps, chirp)
+			}
+		}
+	}
+	if sorted == "desc" {
+		sort.Slice(chirps, func(i, j int) bool { return chirps[i].Id > chirps[j].Id })
+	} else {
+		sort.Slice(chirps, func(i, j int) bool { return chirps[i].Id < chirps[j].Id })
+	}
 	return chirps, nil
 }
 
