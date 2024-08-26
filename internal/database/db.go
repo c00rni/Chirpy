@@ -30,8 +30,9 @@ type User struct {
 }
 
 type Chirp struct {
-	Id   int    `json:"id"`
-	Body string `json:"body"`
+	Id       int    `json:"id"`
+	Body     string `json:"body"`
+	AuthorId int    `json:"author_id"`
 }
 
 // NewDB creates a new database connection
@@ -51,15 +52,16 @@ func NewDB(path string) (*DB, error) {
 }
 
 // CreateChirp creates a new chirp and saves it to disk
-func (db *DB) CreateChirp(body string) (Chirp, error) {
+func (db *DB) CreateChirp(body string, userId int) (Chirp, error) {
 	database, loadingErr := db.LoadDB()
 	if loadingErr != nil {
 		return Chirp{}, loadingErr
 	}
 	id := len(database.Chirps) + 1
 	chirp := Chirp{
-		Id:   id,
-		Body: body,
+		Id:       id,
+		Body:     body,
+		AuthorId: userId,
 	}
 
 	database.Chirps[id] = chirp
@@ -87,6 +89,27 @@ func (db *DB) CreateUser(email string, password []byte) (User, error) {
 		return User{}, wErr
 	}
 	return user, nil
+}
+
+// CreateUser create a new user and save it to disk
+func (db *DB) DeleteChirp(chirpId, userId int) error {
+	database, loadingErr := db.LoadDB()
+	if loadingErr != nil {
+		return loadingErr
+	}
+	if database.Chirps[chirpId].AuthorId != userId {
+		return errors.New("Unauthorized delete.")
+	}
+	delete(database.Chirps, chirpId)
+	i := 1
+	for _, chirp := range database.Chirps {
+		chirp.Id = i
+		i += 1
+	}
+	if wErr := db.writeDB(database); wErr != nil {
+		return wErr
+	}
+	return nil
 }
 
 // UpdateUser update a user info and save it to disk

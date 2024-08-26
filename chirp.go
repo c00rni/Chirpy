@@ -18,6 +18,12 @@ func (cfg *apiConfig) handlerValidation(w http.ResponseWriter, req *http.Request
 	}
 	defer req.Body.Close()
 
+	token := extractJWT(req)
+	if token == "" {
+		respondWithError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
 	decoder := json.NewDecoder(req.Body)
 	userData := userInput{}
 	err := decoder.Decode(&userData)
@@ -65,7 +71,17 @@ func (cfg *apiConfig) handlerValidation(w http.ResponseWriter, req *http.Request
 	}
 	cleanedStr := strings.Join(cleanedW, " ")
 
-	chirp, cErr := cfg.db.CreateChirp(cleanedStr)
+	subject, sErr := getTokenSubject(token, []byte(cfg.jwtSecret))
+	if sErr != nil {
+		respondWithError(w, http.StatusUnauthorized, "Unautohorized token")
+		return
+	}
+	userId, iErr := strconv.Atoi(subject)
+	if iErr != nil {
+		respondWithError(w, http.StatusUnauthorized, "Unautohorized token")
+		return
+	}
+	chirp, cErr := cfg.db.CreateChirp(cleanedStr, userId)
 	if cErr != nil {
 		log.Printf("Failed to create chirp : %v", cErr)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -82,6 +98,41 @@ func (cfg *apiConfig) handlerValidation(w http.ResponseWriter, req *http.Request
 	}
 	w.WriteHeader(http.StatusCreated)
 	w.Write(data)
+}
+
+func (cfg *apiConfig) handleChirpDelete(w http.ResponseWriter, req *http.Request) {
+	token := extractJWT(req)
+	if token == "" {
+		respondWithError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	subject, sErr := getTokenSubject(token, []byte(cfg.jwtSecret))
+	if sErr != nil {
+		respondWithError(w, http.StatusUnauthorized, "Unautohorized token")
+		return
+	}
+	userId, iErr := strconv.Atoi(subject)
+	if iErr != nil {
+		respondWithError(w, http.StatusUnauthorized, "Unautohorized token")
+		return
+	}
+
+	idStr := getPathValue(req, "chirpID")
+	chirpId, cErr := strconv.Atoi(idStr)
+	if cErr != nil {
+		respondWithError(w, http.StatusInternalServerError, "Internal error")
+		return
+	}
+
+	dErr := cfg.db.DeleteChirp(chirpId, userId)
+	if dErr != nil {
+		respondWithError(w, http.StatusForbidden, "Forbidden delete.")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+	w.Write([]byte{})
+	return
 }
 
 func (cfg *apiConfig) listChirps(w http.ResponseWriter, req *http.Request) {
@@ -113,12 +164,10 @@ func (cfg *apiConfig) getChirps(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte{})
 		return
 	}
-	idStr := r.PathValue("id")
+	idStr := getPathValue(r, "id")
 	id, cErr := strconv.Atoi(idStr)
 	if cErr != nil {
-		log.Printf("Failed to get an Id from the request : %v", cErr)
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte{})
+		respondWithError(w, http.StatusInternalServerError, "Internal error")
 		return
 	}
 	if chirp, ok := allDb.Chirps[id]; ok {
