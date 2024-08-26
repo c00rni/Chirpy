@@ -7,10 +7,9 @@ The project is a CRUD REST Api write in go using [jwt-go](https://pkg.go.dev/git
 ## Insttall
 
 The server need golang install to run.
-`sudo apt-get update && sudo apt-get -y install golang-go` 
 
-Create a .env file
-```
+Create a .env file: 
+```cfg
 # ./.env
 
 JWT_SECRET=<CHANGE_THIS_PART>
@@ -19,7 +18,8 @@ POLKA_API_KEY=<CHANGE_THIS_PART>
 
 ## Usage
 
-Without change in main.go the webserver for the API will live at port `8080`:
+Without change in main.go the webserver for the API will live at port 8080
+
 `go build -o out && ./out`
 
 
